@@ -1,507 +1,196 @@
-<h1 align="center">📱 Smart Home Fall Detection for Elderly Safety</h1>
-<h3 align="center">Data-Driven Simulation</h3>
-<hr>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png">
+  <img alt="The University of Chicago, MS in Applied Data Science. ADSP 32014 course project." src=".github/assets/banner-light.png">
+</picture>
 
+# Smart Home Fall Detection for Elderly Safety
 
-## Overview 
+> **Example project from Winter 2026.** This is a copy of [XjFa/fall-detection-system](https://github.com/XjFa/fall-detection-system), shown with the authors' work and commit history intact. Their own write-up is [REPORT.md](REPORT.md). Course staff wrote this README and made the edits listed under [Changes by course staff](#changes-by-course-staff), including the section on [what to learn from this project](#what-to-learn-from-this-project). The recordings are UCI's "Localization Data for Person Activity", public under CC BY 4.0 and kept in this repository with attribution; [data/README.md](data/README.md) describes them.
 
-Falls are a leading cause of injury among elderly individuals living independently.  
+An older person who lives alone and falls may not be able to call for help, and a fall alarm is only useful if it catches most falls without going off so often that nobody answers it. Can a model that knows how activities follow one another tell a fall from lying down, sitting or kneeling, using four tags worn on the body? The team took 25 recordings of five people acting out the same scripted scenario, with tags on both ankles, the belt and the chest, and built four models: one Gaussian hidden Markov model per activity, a random forest whose frame-by-frame class probabilities are smoothed by Viterbi decoding with an activity transition matrix, a hidden semi-Markov model with Poisson durations, and a bidirectional LSTM as a baseline. A Streamlit dashboard runs three of them over sliding windows of a recording and raises an ensemble alarm.
 
-This project implements a **data-driven fall detection system** using motion sensor data collected from a smart home environment.  
+**A note on terms.** The tags are located by an ultra-wideband radio system, and each row of the data is one tag's position in the room, in metres. Nothing in this data measures acceleration. The write-up and several of its figures call the coordinates accelerometer signals, the length of a tag's position vector "acceleration magnitude" and its change between frames "jerk". Read these as position, distance from the room's origin, and change in that distance.
 
-Instead of relying on a single classification model, the system compares multiple sequence modeling approaches:
+## Summary
 
-| Model | Type | Purpose |
-|-------|------|---------|
-| **LSTM (Long Short-Term Memory)** | Deep learning sequence model(Baseline) | Sequence-aware fall detection |
-| **Hidden Markov Model (HMM)** | Generative probabilistic | General activity modeling |
-| **Random Forest + HMM Smoother** | Ensemble | Frame-level classification + temporal smoothing |
-| **Hidden Semi-Markov Model (HSMM)** | Probabilistic with duration prior | Safety-critical fall detection |
+**Data.** UCI dataset 196 from the Jožef Stefan Institute: 164,860 rows, each one tag's x, y and z position with a time stamp and one of eleven activity labels. Five people each performed the same scenario five times, giving 25 recordings and 91.0 minutes. Every recording contains three falls, 75 in all, lasting 1.26 seconds on average; 1.8 percent of rows are labelled falling. The team merges the activities into six: walking, falling, lying, sitting, standing (the three standing-up transitions) and on all fours.
 
-The frontend provides an **interactive Streamlit dashboard** that performs sliding-window fall detection, visualizing fall probability over time.
+**Frames and features.** The tags are read in turn, about 27 ms apart, and each row becomes a frame of twelve coordinates by carrying the other tags' last positions forward. The forest adds per-tag vector lengths, their changes and ten-frame rolling statistics, and four cross-tag summaries: 32 features.
 
----
+**Models.** Per-activity Gaussian HMMs, fit in hmmlearn, label a stretch of frames with the activity whose HMM fits it best, on the four vector lengths ("4-D") or the twelve coordinates ("12-D"). The forest gives class probabilities for every frame, and Viterbi with a transition matrix counted from the training labels turns them into the most probable label path. The HSMM adds a Poisson log-probability of a stretch's length. The LSTM labels each frame fall or not fall.
 
-## About the Dataset
+**Evaluation.** Leave-one-sequence-out cross-validation over the 25 recordings ("LOSO"), scored with frame-level classification reports.
 
-### Context
-This dataset originates from research on safer smart environments for independent living. It was collected to analyze human activity using **body-worn sensors**, with a focus on understanding movements and detecting falls in a controlled setting.
+**Results as reported.** The smoothed forest has the best six-class accuracy, 0.847 against 0.828 without smoothing, with fall recall 0.33; the weighted LSTM has the best fall F1, 0.68 at recall 0.73. The write-up suggests the LSTM as the first alarm and the smoothed forest for tracking activity.
 
-### Dataset Overview
-- **Participants:** 5 individuals  
-- **Repetitions:** Each participant performed the same scenario **five times**  
-- **Sensors:** Four body-worn tags per participant:
-  - `ANKLE_LEFT` → 010-000-024-033  
-  - `ANKLE_RIGHT` → 010-000-030-096  
-  - `CHEST` → 020-000-033-111  
-  - `BELT` → 020-000-032-221  
-- **Measurements:** 3D localization coordinates (`X`, `Y`, `Z`) for each sensor  
-- **Activities:** walking, falling, lying down, sitting down, standing up, on all fours, and others (11 total)  
-- **Instances:** 164,860  
-- **Features:** 8 (sequence name, tag ID, timestamp, date, X, Y, Z, activity label)  
-- **Missing values:** None  
+**The dashboard.** `app.py` slides a 100-frame window over a recording and raises an alarm when a weighted average of three models' outputs exceeds 0.5.
 
-### Data Structure
-- Each row corresponds to a **single sensor reading** at a specific timestamp.  
-- Sequence name identifies the participant and repetition: e.g., `A01` → Participant A, first scenario repetition.  
-- Tag ID identifies the sensor.  
-- `Activity` column is categorical with 11 possible activities.
+The staff section below shows that the smoother is the project's strongest result, undersold because the write-up scores frames rather than alarms, and which other numbers rest on shortcuts: test segments cut at the true activity boundaries, a duration model handed the true durations, a threshold tuned on the test folds, and falls that always happen in the same three places.
 
-### Variable Summary
+## Team and contributions
 
-| Column        | Description |
-|---------------|-------------|
-| Sequence Name | Participant & repetition (A01–E05) |
-| Tag ID        | Sensor identifier (ANKLE_LEFT, ANKLE_RIGHT, CHEST, BELT) |
-| Timestamp     | Unique numeric timestamp |
-| Date          | Format: `dd.MM.yyyy HH:mm:ss:SSS` |
-| X             | X-coordinate of the tag |
-| Y             | Y-coordinate of the tag |
-| Z             | Z-coordinate of the tag |
-| Activity      | Human activity label (walking, falling, lying, etc.) |
+Team "Latent Space Warriors", Winter 2026.
 
+- **Xiaojing Fang** ([@XjFa](https://github.com/XjFa)): the repository and nearly all of its code: every version of the notebook, now `notebooks/model_fitting.ipynb`, including the random forest and HSMM sections that first appear in the version of February 26; the training modules under `models/` and `models/inference.py`; the Streamlit app and its demo GIF; the exploratory figures; and the write-up's structure and its dataset, exploratory, dashboard and ensemble sections.
+- **Lexi Lin** ([@lexi-lin](https://github.com/lexi-lin)): the write-up's sections on preprocessing, model details and results, including the analysis of the random forest and HSMM results, and the four result figures `RFHMM_ConfusionMatrix.png`, `RFHMM_Normalized_ConfusionMatrix.png`, `RFHMM_Top20Features.png` and `HSMM_ConfusionMatrix.png`.
 
-### Acknowledgements
-Refactored from the [UCI Localization Data for Person Activity dataset](https://archive.ics.uci.edu/ml/datasets/Localization+Data+for+Person+Activity).  
-> B. Kaluza, V. Mirchevska, E. Dovgan, M. Lustrek, M. Gams, *An Agent-based Approach to Care in Independent Living*, International Joint Conference on Ambient Intelligence (AmI-10), Malaga, Spain, In press.
+The repository ran from February 16 to March 9, 2026, with 37 commits, 28 by Xiaojing Fang and 9 by Lexi Lin. The notebook was always committed from Xiaojing Fang's account, so the account that committed a cell is not necessarily its author; the random forest and HSMM cells differ in style from the rest, and their figures were committed by Lexi Lin. The attributions follow the [commit history](https://github.com/uchicago-dsi-bayesianml/wi26-fall-detection-hmm/commits/main).
 
----
+## Getting started
 
-## Project Structure
-```
-project_root/
-│
-├── data/
-│   └── ConfLongDemo_JSI.txt
-│
-├── model/
-│   ├── __init__.py
-│   ├── preprocessing.py
-│   ├── inference.py
-│   │
-│   ├── hmm/
-│   │   ├── __init__.py
-│   │   └── train.py
-│   │
-│   ├── lstm/
-│   │   ├── __init__.py
-│   │   ├── model.py
-│   │   └── train.py
-│   ├── rf/
-│   │   ├── __init__.py
-│   │   └── train.py
-├── app.py
-├── requirements.txt
-└── README.md
+The data is in the repository and the notebook keeps its outputs, so it can be read without running anything. `requirements.txt` lists its packages without versions.
+
+```sh
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt jupyter
 ```
 
----
-## Exploratory Data Analysis 
-### Acceleration Magnitude Distribution
+**The pipeline.**
 
-Acceleration magnitude summarizes the overall motion intensity captured by the wearable sensors. The chart below shows the distribution helps identify differences in movement patterns across sensor locations.
+1. `notebooks/model_fitting.ipynb` is the project: data checks and exploratory figures, the HMMs, the random forest with the smoother, the HSMM and two LSTMs. It reads `../data/ConfLongDemo_JSI.txt`, so start Jupyter in `notebooks/`.
+2. From the repository root, `python -m models.hmm.train`, `python -m models.lstm.train` (the authors warn that it may take a long time) and `python -m models.rf.train` train the app's models into `models/*/artifacts/`, which is git-ignored.
+3. `streamlit run app.py` starts the dashboard.
 
-<p align="center">
-  <img src="asset/acceleration_magnitude.png" width="650">
-</p>
+**Staff check.** `staff/check_event_metrics.py` rebuilds the forest and the smoother from cells 108 to 111 and scores them as an alarm under the authors' split and a split by person, with and without features that depend on room position, and prints where the falls happen and the chunk lengths behind the HSMM's duration term. It needs NumPy, pandas and scikit-learn; with 50 trees per forest (the notebook uses 200) it ran in about 75 seconds on an 18-core laptop.
 
-Key observations:
-
-- The ankle readings have higher acceleration magnitudes, corresponding to more dynamic movements.
-- The chest and belt sensors show lower values, which are associated with stationary or low-motion activities.
-
----
-
-### Activity Transition Patterns
-
-To understand how activities evolve over time, we computed transition probabilities between activities using a normalized transition matrix.
-
-<p align="center">
-  <img src="asset/activity_transitions.png" width="800">
-</p>
-
-Key observations:
-
-- Certain activities exhibit strong self-transitions, such as lying and sitting, indicating temporal persistence.
-- These patterns motivate the use of **sequence models such as Hidden Markov Models (HMMs)**.
-
----
-
-### Sensor Signal Over Time
-
-The following chart shows raw accelerometer signals along the X, Y, and Z axes for a single sequence A01. 
-
-<p align="center">
-  <img src="asset/sensor_signal.png" width="700">
-</p>
-
-Key observations:
-- Smooth signal segments indicate periods of stable activity, while sudden spikes may correspond to abrupt movements. The signal trend shifting show potential activites changes
-
----
-### Accelation Time Series by Participants
-
-The following chart shows the raw accelerometer signals recorded from participants **A–E** across their repeated activity sessions.
-
-<p align="center">
-  <img src="asset/acceleration_ts_by_participant.png" width="700">
-</p>
-
-Key observations:
-- Each participant performs the same scenario **five times**, but the sensor patterns vary across repetitions.
-- Because the signal patterns differ between repetitions, it may be more appropriate to **treat each repetition as an independent sequence** during modeling.
-
-
----
-### Sensor Reading by Activities
-
-The following chart shows raw accelerometer signals across different **activities**.
-
-<p align="center">
-  <img src="asset/sensor_readings_by_activity.png" width="700">
-</p>
-
-Key observations:
-- Some activities produce **very similar sensor patterns**, such as *sitting down*, *sitting*, and *sitting on the ground*.
-- These activities may potentially be **grouped into broader activity categories** during modeling or preprocessing.
-
-
-
-
-
-
----
-## Data Preprocessing
-
-**General Preprocessing Steps For All Models:**
-
-- Load dataset and assign descriptive column names  
-- Convert `date_time` to pandas datetime and acceleration columns to float  
-- Sort by `sequence_name` and `date_time` for chronological order  
-- Check for missing values and verify data integrity  
-- Map activity labels for binary or multi-class tasks  
-- Apply **StandardScaler** for feature normalization  
-- One-Hot encode categorical features (e.g., sensor ID)  
-- Group by `sequence_name` for participant-level analysis  
-- Compute derived features like **acceleration magnitude**
-
-**Distinctive Preprocessing:**
-- **Random Forest / HMM:**
-  - Activities combined into 6 macro-activities (walking, falling, lying, sitting, standing, on all fours)
-  - Sliding windows → statistical features per window (mean, std, min, max, skew, kurtosis)  
-- **HMM / HSMM:**
-  - 6 macro-activities as in Random Forest + HMM  
-  - Sequence-level multivariate observations, optionally augmented with duration features for HSMM
-
----
-
-<img width="869" height="504" alt="image" src="https://github.com/user-attachments/assets/c102bc89-7eec-46d1-8e89-de826f1c9b49" />
-
-
----
-
-## Backend Models
-
-### 1. LSTM (Baseline)
-
-- **Bidirectional 2-layer LSTM** with hidden size `128`, capturing temporal patterns in **12-dimensional motion features** for each frame sequence.
-
-- Sequence outputs `h_t` are fed into a **linear classifier**:  `z_t = W * h_t + b`  producing **frame-level logits**.
-
-- **Sigmoid activation** converts logits to fall probabilities:  `p_t = 1 / (1 + exp(-z_t))`  with an optimized **decision threshold (~0.94)** for detecting falls.
-
-- Trained using **class-weighted Binary Cross-Entropy with logits (BCEWithLogitsLoss)** and the **Adam optimizer**, with the positive class weight calculated per training fold to handle severe class imbalance.
-
-### 2. 12D HMM
-
-- **One Gaussian HMM per activity class** (`falling`, `lying`, `sitting`, `standing`, `walking`, `on_all_fours`) trained on **12D motion features** from four body sensors (`ANKLE_LEFT`, `ANKLE_RIGHT`, `BELT`, `CHEST`).
-
-- **Activity sequences are split into chunks** at label changes; features are **standardized** before training. Each HMM has **3 hidden states with full covariance matrices** to model temporal dynamics.
-
-- **Chunk-level predictions** are computed using **length-normalized log-likelihoods**, converted to probabilities via **softmax**. The predicted activity is the class with the highest probability.
-
-- Predictions are **expanded to frame-level**, providing a **falling probability per frame** for threshold-based detection and evaluation with frame-level accuracy and macro F1-score.
-
-### 3. Random Forest + HMM Smoother
-- Stage 1: RF predicts frame-level activity probabilities from sensor features  
-- Stage 2: HMM smooths RF predictions using the **Viterbi algorithm**  
-- Combines nonlinear frame-level classification with **temporal coherence**
-- **Leave-One-Sequence-Out (LOSO)** training and evaluation where the full pipeline is rerun independently for each of the 25 folds (sequences) 
-
-### 4. Hidden Semi-Markov Model (HSMM) – Not in Dashboard
-- Two levels: **Gaussian HMM** as an emission sub-model combined with an explicit **Poisson duration distribution**
-- Each frame is represented by an **8-dimensional feature vector** derived from 4-body worn sensors
-    - 4 magnitude features
-    - 4 jerk features
-- Per-activity Gaussian HMM to model each activity's internal dynamics
-- 6 x 6 activity-level transition matrix is estimated by counting chunck-to-chunck transitions with Laplace smoothing (no self-transitions)
-- Uses **segment-level Viterbi decoding**
-- **Leave-One-Sequence-Out (LOSO)** training and evaluation for 25 folds
-
-
----
-## Model Results
-
-### 1. Baseline LSTM (Weighted)   
-| Class         | Precision | Recall | F1-score | Support  |
-|---------------|:---------:|:-----:|:--------:|---------:|
-| Non-fall (0)  | 1.00      | 0.99  | 0.99     | 161,887  |
-| Fall (1)      | 0.63      | 0.73  | 0.68     | 2,973    |
-| **Overall**   | -         | -     | 0.99     | 164,860  |
-
-  - Achieved **high overall accuracy (0.987)** and **macro F1 score (0.84)**
-
-  - **Class imbalance was explicitly addressed** using **class-weighted Binary Cross-Entropy loss**, giving higher penalty to missed fall events during training.
-
-  - The model achieved **fall detection performance of F1 = 0.68** with **recall = 0.73**, indicating it is able to capture many true fall events.
-
-  - However, the model is **highly biased toward the dominant non-fall class** because fall frames represent only a **very small fraction of the dataset**.
-
-  - As a result, the **extremely high overall accuracy could be misleading**, and the model may **struggle to generalize to new subjects or real-world environments** where fall patterns and class distributions differ.
-
---- 
-### 2. Activity-Level 12D HMM Model
-
-
-| Class        | Precision | Recall | F1-score | Support |
-|--------------|:---------:|:------:|:--------:|--------:|
-| Falling      | 0.10      | 0.29   | 0.15     | 2,973  |
-| Lying        | 0.63      | 0.51   | 0.56     | 60,648 |
-| On all fours | 0.00      | 0.00   | 0.00     | 5,210  |
-| Sitting      | 0.40      | 0.47   | 0.43     | 40,729 |
-| Standing     | 0.16      | 0.30   | 0.20     | 22,590 |
-| Walking      | 0.69      | 0.31   | 0.43     | 32,710 |
-
-**Accuracy:** 0.413  | **Macro Avg F1:** 0.296  | **Weighted Avg F1:** 0.43  
- 
-- Better-performing in **walking**, **lying** (moderate).  
-- Poorly detected **falling, standing, and transitional activities** (e.g., on all fours).  
-- Performance is limited by **class imbalance** and **rare-event sequences**, affecting generalization to infrequent motions.
-
-
-
----
-
-
-### 3. Random Forest (RF) + HMM Smoother
-
-
-<p align="center">
-  <img src="asset/RFHMM_ConfusionMatrix.png" width="650">
-</p>
-
-
-
-- Achieved the **highest overall accuracy (0.85)** and **macro F1 score (0.74)** across all tested models, outperforming the best previous pure HMM (**12D model: 0.72 accuracy**) by a meaningful margin.
-
-- The **HMM smoothing layer improved accuracy by +0.02** over the Random Forest alone (**0.828 → 0.847**) by penalizing physically implausible frame-to-frame transitions.
-
-- These results confirm that **temporal context adds value** on top of frame-level classification.
-
-- **Walking** and **sitting** are classified with high reliability (**F1 = 0.93** and **0.92**, respectively), reflecting their distinctive and consistent sensor signatures across subjects.
-
-- **Falling remains the weakest class** (**F1 = 0.48**, **recall = 0.33**), meaning the model misses roughly **two-thirds of actual fall events** at the frame level. This represents a critical limitation for a fall detection system, where **false negatives carry a high safety cost**.
-
-- The **precision–recall imbalance for falling** (**precision = 0.86**, **recall = 0.33**) suggests the model is **conservative**: when it predicts a fall it is usually correct, but it fails to flag the majority of actual falls. This is likely because falls occupy **very few frames relative to the total dataset**.
-
-<p align="center">
-  <img src="asset/RFHMM_Normalized_ConfusionMatrix.png" width="700">
-</p>
-
-**Well-Classified Activities:**
-
-- **Walking** is classified near-perfectly with a recall of 0.98, meaning the model correctly identifies 98% of all walking frames. Its sensor signature (rhythmic, periodic oscillation across all four body positions) is highly distinctive and consistent across subjects
-- **Sitting and lying** achieve 0.89 and 0.88 recall respectively, also well-classified. The low acceleration magnitude and stability across all sensors makes them easy to separate from dynamic activities
-
-
-**Problematic Activities:**
-
-- **Falling has the lowest recall at 0.33**, meaning the model misses two-thirds of actual fall events. Misclassifications are spread across all other classes — walking (0.27), standing (0.18), lying (0.11), and sitting (0.12) — suggesting the model sees different phases of a fall and assigns each phase to whichever static or dynamic activity it most resembles at that frame. This may be a consequence of frame-level classification without duration awareness
-
-- Falling is confused with many classes, but no other class is significantly confused with falling (all off-diagonal entries in the falling column are 0.00 or very small). This means the model **rarely produces false fall alarms** but **very frequently misses true falls** — a precision-recall tradeoff that is the opposite of what a safety-critical fall detection system should aim for
-
-<p align="center">
-  <img src="asset/RFHMM_Top20Features.png" width="700">
-</p>
-
-- **CHEST_z is the single most important feature by a large margin**, with a mean decrease in impurity of ~0.135 — more than double the next features. The vertical axis of the chest sensor captures postural orientation most directly, making it the strongest individual discriminator between upright activities (walking, standing) and horizontal ones (lying, falling)
-  
-- Chest and belt sensor dominate feature importance (CHEST_roll_mean, CHEST_x, BELT_z, BELT_x, CHEST_y, and BELT_y all appear in the top 7), confirming that **the torso-mounted sensors (chest and belt) collectively carry the most discriminative signal**. This is expected since trunk orientation changes most dramatically across activities
-
-- ANKLE_LEFT_roll_mean and ANKLE_RIGHT_roll_mean both rank higher than their raw axis counterparts. This indicates that **temporal smoothing adds more information for ankle sensors** than for chest/belt sensors, likely because ankle readings are noisier and the rolling mean reduces variance to expose the underlying activity state
-
-- Magnitude features, including mag_mean and CHEST_mag, ANKLE_RIGHT_mag, BELT_mag, ANKLE_LEFT_mag, all appear in the top 20. Magnitude is rotation-invariant, so it provides reliable signal regardless of how a tag is oriented on the body
-
-  
----
-
-### 4. Hidden Semi-Markov Model
-<p align="center">
-  <img src="asset/HSMM_ConfusionMatrix.png" width="700">
-</p>
-
-
-
-  - The model performs **poorly overall**, with a macro F1 of **0.19** and overall accuracy of **21%**, which is barely above chance for a 6-class problem. However, the results are not uniform across classes.
-    
-  - The Falling Class is the **best performing class** in the model with a precision of 0.68, meaning relatively few false alarms, and recall of 0.40 which misses 60% of true falls.
-    
-  - Like the RF + HMM model, low recall is still the problem here. **The model is conservative**, reluctant to predict "falling" which gives decent precision but at the cost of too many missed events.
-    
-  - For a safety applicatio, we would want to optimize **recall over precision** to catch more real falls, so this trade-off is currently the wrong way around.
-    
-  - The remaining five classes tell a concerning story. Walking is predicted everywhere, lying and sitting are completely missed. This pattern suggests the model has learned that **"walking" like acceleration magnitudes and jerks are a safe default**, while the low-movement activities are consistently outscored.
-    
-  - The poor performance of HSMM could be attributed to severe class imbalance and feature similarities among static activities. In a way, lying, sitting, and standing all produce low-magnitude, low-jerk signals. A richer feature set (e.g., frequency-domain features) would help separate these. 
-
----
-
-## Summary 
-
-
-| Model           | Overall Accuracy | Falling Recall | Falling F1 | Notes |
-|-----------------|----------------|----------------|------------|-------|
-| LSTM (Weighted) | 0.99           | 0.73           | 0.68       | Binary model; highest overall accuracy but biased on falling due to severe class imbalance |
-| 12D HMM (fall)        | 0.10           | 0.29           | 0.15       | Baseline HMM using all 12 sensor features; lowest overall performance |
-| RF + HMM (fall)        | 0.86           | 0.33           | 0.48       | Frame-level RF predictions smoothed by HMM; high multi-class accuracy |
-| HSMM (fall)            | 0.21           | 0.40           | 0.50       | Temporal model focused on fall events; moderate fall detection, lower overall accuracy
-
-- **LSTM (Weighted)** achieves **very high overall accuracy (0.99)**, but this is largely driven by the **dominant non-fall class**. While it captures many fall events (**recall 0.73, F1 0.68**), the model is **less reliable for unseen subjects or real-world falls** but can serve as premilary fall trigger
-
-- **12D HMM** uses all 12 sensor features as a baseline and achieves **low frame-level performance (accuracy 0.41, macro F1 0.30)**. It detects common activities like sitting, walking, and lying moderately well but struggles with rare or transitional events such as falling and being on all fours.
-
-- **RF + HMM (fall)** combines frame-level Random Forest predictions with HMM smoothing. This approach provides **the best multi-class accuracy (0.85)** and **temporal consistency**, though its fall detection performance remains modest (**recall 0.33, F1 0.48**).
-
-- **HSMM (fall)** results in **low overall accuracy (0.21)** and **moderate fall detection (recall 0.40, F1 0.50)**. While it incorporates **explicit temporal modeling to capture fall events**, its performance is **limited compared to other models**, reflecting the trade-off between fall sensitivity and overall accuracy.
-
-### Potential Implementation
-
-
-**Option 1:** Combine predictions from multiple models to create a **more robust fall alert**, potentially with **custom logic**, though this may increase computational complexity.
-
-
-**Option 2:** Use **LSTM (Weighted)** as a **initial fall alert**, while leveraging **RF + HMM Smoother** for general activity state **modification**.
-
-
----
-
-## Limitation and Future Improvement
-
-- **Enhanced sensors:** Add gyroscopes, pressure sensors, or ambient devices for richer motion data.  
-- **Class imbalance & bias:** LSTM favors non-fall frames; use data augmentation or class-weighted losses to improve fall recall.  
-- **Generalization & validation:** Test on larger, diverse datasets for robust real-world performance.  
-- **Interpretability:** Add explainability (e.g., SHAP, attention) to increase trust in predictions.  
-- **Multi-model approach:** Combine HSMM (high fall recall) and RF+HMM (multi-class accuracy) for a robust fall alert system.
-
----
-Sample Use
----
-### 📱 Multi-Model Fall Alert
-
-For each sliding window of sensor data, three models produce fall-related prodictions. The final fall probability is computed using a **weighted ensemble**. The weights were chosen empirically based on model performance, giving higher influence to the LSTM due to its stronger fall detection capability while still incorporating complementary signals from the RF+HMM and 12D HMM models:
-
-```
-p_ensemble = 0.55 * p_LSTM
-           + 0.30 * p_RF
-           + 0.15 * p_HMM
+```sh
+python staff/check_event_metrics.py        # --trees 200 matches the notebook, at four times the cost
 ```
 
-A fall alert is triggered using a threshold decision rule:
+The script defines its terms at the top, and this README uses them the same way. A *frame* is one row of the data file. A *fall event* is a maximal run of frames labelled falling in one recording; there are 75. A *fall segment* is a maximal run of frames a model labels falling. A fall is *caught* if some fall segment overlaps the fall widened by 40 frames, about one second, on each side. A *false alarm* is a fall segment that overlaps no widened fall. *Per hour* divides by the 91.0 minutes of recording.
 
-```
-if p_ensemble > 0.5:
-    prediction = "falling"
-else:
-    prediction = "non-fall"
-```
+**What does not run as committed.** Cell numbers count every cell of the notebook from the top, starting at 1. Cell 103 has a syntax error (`rep_4d =ort classification_report(...)`), so its stored output comes from an earlier version of the cell. Cell 100, behind the write-up's frame-level 12-D table, keys its state counts by the six merged labels but reads the eleven raw ones, so run in order it stops with a `KeyError`; its stored output, whose `nan` class of 5,210 frames the write-up relabels "On all fours", comes from a kernel state the committed cells do not recreate. The hierarchical HMM (cells 52 to 75) runs but does not do what it describes: hmmlearn overwrites the global parameters copied into each per-recording HMM (see its warnings in cell 57), and test recordings are labelled with another model's state mapping, for a fall F1 of 0.00 (cell 59). The input-output HMM in cell 128 stops with an `ImportError` inside seqlearn. The HSMM cells 118 to 120 have no stored output, cell 121 ("Full Viterbi Decoding") holds only imports, and cell 124 uses names no cell defines, such as `duration_params`; the write-up's HSMM figure is a screenshot of a report from a run not in the notebook. Run from the top, the LSTM cells would train on the forest's 32 features, because cell 109 reassigns `X_sequences`; their stored output (cell 134) shows twelve.
 
-```mermaid
-flowchart LR
+The app does not run the models the notebook evaluates. `models/rf/train.py` trains its forest on the 12 raw coordinates, because the sequences `preprocess_pipeline` returns hold only those, and saves the forest of its last fold, which never saw recording E05. `models/inference.py` averages the forest's fall probabilities over each window with no Viterbi smoothing, although the demo GIF, recorded from an earlier version of the app, titles that panel "Random Forest + HMM Smoothing". The HMM and LSTM are trained on all 25 recordings, so the dashboard only ever shows recordings they were trained on.
 
-A["Wearable Sensors\nAnkle L/R, Belt, Chest"] --> B["Sensor Data Stream"]
-B --> C["Preprocessing Pipeline"]
-C --> D["Sliding Window Segmentation\nWindow=100, Step=50"]
+## Data
 
-D --> E["LSTM Model\nFall Probability"]
-D --> F["RF + HMM Smoother"]
-D --> G["12D HMM Model\nBaseline"]
+`data/ConfLongDemo_JSI.txt` is byte-identical to UCI's download; [data/README.md](data/README.md) gives the columns, tag IDs, time format, label counts, citation and download link.
 
-E --> H["Ensemble Fall Decision"]
-F --> H
-G --> H
+- **Source:** [UCI Machine Learning Repository, dataset 196](https://archive.ics.uci.edu/dataset/196/localization+data+for+person+activity), from the Jožef Stefan Institute's Confidence project, whose papers describe a Ubisense ultra-wideband location system sampling each tag at 10 Hz with a specified accuracy of 15 cm.
+- **Terms:** CC BY 4.0. Cite the dataset and Kaluža et al., "An Agent-based Approach to Care in Independent Living", AmI 2010, LNCS 6439.
+- **Signals:** x, y and z positions in metres, z being height; while walking, the median chest tag is 1.26 m above the floor (staff script).
+- **Recordings and labels:** five people, five repetitions of one scripted scenario, eleven activities merged into six. There is no plain "standing" activity; the merged class is the three standing-up transitions.
 
-H --> I["Final Fall Alert"]
-I --> J["Streamlit Dashboard\nVisualization"]
+## Project structure
 
-```
-### Dashboard Demo
-<p align="center">
-  <img src="asset/demo.gif" width="700" alt="Fall Detection Dashboard Demo"/>
-</p>
+| Path | Contents |
+|---|---|
+| `REPORT.md` | The authors' write-up. It embeds the 11.8 MB `asset/demo.gif` and one image hosted outside the repository, a preprocessing diagram behind a GitHub user-attachments link. |
+| `notebooks/model_fitting.ipynb` | Everything evaluated: exploratory figures, the hierarchical and per-activity HMMs, the forest with the smoother, the HSMM, the input-output HMM and two LSTMs. |
+| `models/preprocessing.py` | Loading, tag mapping, the activity merge, the 12-coordinate frames and the 32 forest features. |
+| `models/hmm/train.py`, `models/lstm/`, `models/rf/train.py` | Training of the app's three models, described under Getting started. |
+| `models/inference.py`, `app.py` | Window-level predictions, the weighted ensemble and the Streamlit dashboard. |
+| `asset/` | The write-up's figures and the demo GIF. |
+| `data/` | The UCI data file, UCI's description and the staff data note. |
+| `staff/check_event_metrics.py` | Course staff's check of the smoother as an alarm, described above. |
 
----
+## Method
 
+**Preprocessing.** Rows become twelve-coordinate frames as described above, and features are standardized with training-fold statistics. The hierarchical HMM and the LSTMs separate falling from everything else; the other models use the six merged labels.
 
+**Per-activity HMMs.** Each training recording is cut into chunks wherever the label changes, and each activity's chunks train one Gaussian HMM with two to four hidden states (diagonal covariances for 4-D, full for 12-D). A test recording is cut the same way, at its own true label changes, and each chunk gets the activity whose HMM gives it the highest log-likelihood per frame. The frame-level 12-D run expands each chunk's label to its frames.
 
-## Running the Application
+**Random forest with an HMM smoother.** A forest of 200 trees with balanced class weights is trained on the 32 features of every training frame and gives six class probabilities per test frame. A transition matrix is counted from consecutive training labels with one added to every cell, and a hand-written Viterbi pass (cell 110) with a uniform start finds the most probable label path, using the forest's probabilities as emission scores.
 
-**1. Install dependencies:**
+**Hidden semi-Markov model.** Each activity gets a Gaussian HMM on the four vector lengths and their changes, and a Poisson duration whose rate is the activity's mean chunk length in the training folds. A test chunk, again cut at the true label changes, is scored for each activity as the HMM log-likelihood plus the Poisson log-probability of its length. A 6 × 6 transition matrix between activities is counted but never used in scoring.
 
-```bash
-pip install -r requirements.txt
-```
-**2. Train models (only if not already trained):**
+**LSTMs.** A two-layer LSTM with 64 hidden units, plain binary cross-entropy and a 0.5 threshold, and a two-layer bidirectional LSTM with 128 units whose loss weights fall frames by the ratio of other frames to fall frames. The bidirectional model's threshold, 0.94, maximizes F1 over the pooled predictions of all 25 test folds (cell 150).
 
-- Train hmm model
-```bash
-python -m models.hmm.train
-```
+**The dashboard.** For each window of 100 frames, in steps of 50, the alarm fires when 0.55 times the LSTM's mean fall probability plus 0.30 times the forest's plus 0.15 times the HMMs' falling probability exceeds 0.5. The write-up says the weights "were chosen empirically based on model performance"; the ensemble is not evaluated anywhere.
 
-- Train lstm model - This might take a long time
-```bash
-python -m models.lstm.train
-```
+### What is Bayesian here
 
-- Train RF+HMM model
-```bash
-python -m models.rf.train
-```
+The per-activity HMMs are generative models of each activity's positions over time, fit with the forward-backward algorithm, and labelling a chunk by the highest likelihood is Bayes' rule with a uniform prior over activities. The "falling probability", a softmax of per-frame log-likelihoods, is a flattened version of that posterior.
 
-**3. Run the Streamlit app**
+The smoother is the most useful piece. It treats the six activities as the hidden states of an HMM, the forest's class probabilities as the evidence at each frame and the counted transition matrix as the prior over activity sequences, and Viterbi finds the most probable path, the decoding problem of the course's HMM sessions. A textbook hybrid divides a classifier's posterior by the class prior to get a likelihood; with balanced class weights the forest's outputs are already close to prior-free. Adding one to every count before normalizing each row of the transition matrix gives exactly the posterior mean of that row under a Dirichlet(1, …, 1) prior; the team calls it Laplace smoothing, which is the same thing.
 
-```bash
-streamlit run app.py
-```
+The HSMM's Poisson durations are the explicit-duration idea, a prior over how long each activity lasts where an ordinary HMM implies a geometric one; as built, it scores chunks whose lengths come from the labels, so it decodes nothing.
 
----
-### Interact with the Fall Detection Dashboard
+What was not built: the methodology document promised a Bayesian HMM with priors on the transition and emission parameters, fit by variational Bayes or MCMC in Pyro, to quantify uncertainty. Everything in the repository is maximum likelihood in hmmlearn, with point estimates and no posterior over any parameter, and the dashboard's probabilities are forest vote shares and softmaxed scores, not calibrated posteriors. An alarm threshold is a decision with very different costs for a missed fall and a false alarm, which is what Bayesian decision theory is for; the thresholds here are 0.5 or the F1 maximum.
 
-The dashboard provides an interactive interface for exploring participant sensor sequences and visualizing fall detection results.
+## Results
 
-**Features:**
+**As reported, checked against the notebook.** Every number matches the stored output of the cell given, except the HSMM row, which exists only in the write-up's figure. Accuracy and macro F1 are over six classes for the HMMs and the forest and over two for the LSTMs, so the groups cannot be compared on those columns.
 
-- **Select participant sequences:**  
-  Choose from sequences containing falls to analyze specific events.
+| Model | Unit scored | Accuracy | Macro F1 | Fall precision | Fall recall | Fall F1 | Cell |
+|---|---|---:|---:|---:|---:|---:|---|
+| 4-D HMM | 700 true chunks | 0.591 | 0.528 | 0.44 | 0.61 | 0.51 | 103 |
+| 12-D HMM, full covariance | 700 true chunks | 0.761 | 0.699 | 0.67 | 0.75 | 0.71 | 99 |
+| 12-D HMM, another run | 700 true chunks | 0.716 | 0.654 | 0.59 | 0.68 | 0.63 | 103 |
+| 12-D HMM, frame-level run | frames | 0.413 | 0.296 | 0.10 | 0.29 | 0.15 | 101 |
+| Random forest | frames | 0.828 | 0.70 | 0.59 | 0.32 | 0.42 | 111 |
+| Random forest + HMM smoother | frames | 0.847 | 0.74 | 0.86 | 0.33 | 0.48 | 111 |
+| HSMM | frames | 0.21 | 0.19 | 0.68 | 0.40 | 0.50 | figure only |
+| LSTM, one direction, threshold 0.5 | frames, binary | 0.980 | 0.577 | 0.35 | 0.11 | 0.16 | 139 |
+| Bidirectional LSTM, weighted, threshold 0.94 | frames, binary | 0.987 | 0.836 | 0.63 | 0.73 | 0.68 | 151 |
 
-- **Run sliding window detection:**  
-  Execute LSTM, Random Forest, and HMM models on fixed-size sliding windows of sensor data.
+The bidirectional LSTM's area under the precision-recall curve for falling is 0.70 (cell 152). The hierarchical HMM finds 17 of 538 fall frames in its five held-out recordings (cell 59).
 
-**Visualizations:**
+**Corrections to the write-up.**
 
-- **Sensor readings over time:**  
-  View all accelerometer and gyroscope signals. Ground truth fall periods are marked with **red vertical lines**:  
-  - Solid line → Fall start  
-  - Dashed line → Fall end
+- The summary table gives the 12-D HMM an accuracy of 0.10, which is its fall precision; the accuracy is 0.413 (cell 101). It gives the smoothed forest 0.86; cell 111 says 0.847.
+- The forest section compares itself with "the best previous pure HMM (12D model: 0.72 accuracy)". That 0.72 is chunk-level with chunks cut at the true labels (cell 103); at frame level the 12-D HMM has 0.413.
+- The 12-D table's "On all fours" row is a `nan` class in cell 101, which that run never predicts.
+- The limitations credit the HSMM with "high fall recall". Its 0.40 is below the LSTM's 0.73 and comes from the duration leak described below.
+- The preprocessing section lists per-window skew and kurtosis and one-hot encoded sensor IDs; the code computes neither. The data is described as accelerometer and gyroscope signals; it is tag positions.
 
-- **LSTM & Random Forest fall probability:**  
-  Window-level probabilities plotted as line charts. High-risk windows (predicted as falling) are highlighted in tables.
+**Staff check: the smoother as an alarm.** From `staff/check_event_metrics.py` with 50 trees per forest, which moves the frame-level numbers by under 0.01 (0.841 against the notebook's 0.847 with the smoother, 0.820 against 0.828 without). "By person" holds out all five recordings of one person at a time. The 23 features without room position are each tag's height, its change and its rolling standard deviation, each tag's horizontal speed and its rolling mean, the chest and belt heights above the ankles, and the horizontal chest-to-ankle distance; none changes if a recording is shifted across the room.
 
-- **HMM activity predictions:**  
-  Model-predicted activity classes over time are displayed as line plots.
+| Split | Features | Model | Accuracy | Fall precision | Fall recall | Falls caught | False alarms per hour |
+|---|---|---|---:|---:|---:|---:|---:|
+| By recording (the authors') | the authors' 32 | forest | 0.820 | 0.52 | 0.38 | 60 of 75 | 155.5 |
+| By recording | the authors' 32 | forest + smoother | 0.841 | 0.73 | 0.40 | 44 of 75 | 4.0 |
+| By person | the authors' 32 | forest | 0.790 | 0.45 | 0.35 | 52 of 75 | 179.9 |
+| By person | the authors' 32 | forest + smoother | 0.818 | 0.62 | 0.38 | 44 of 75 | 5.3 |
+| By recording | 23 without room position | forest | 0.799 | 0.32 | 0.07 | 55 of 75 | 155.5 |
+| By recording | 23 without room position | forest + smoother | 0.845 | 0.77 | 0.06 | 18 of 75 | 3.3 |
+| By person | 23 without room position | forest | 0.791 | 0.27 | 0.06 | 48 of 75 | 168.7 |
+| By person | 23 without room position | forest + smoother | 0.837 | 0.73 | 0.05 | 12 of 75 | 4.6 |
 
-- **Essembled fall alerts:**  
-  Identify windows where **any model predicts a fall**, summarized in a table for quick review.
+Without the smoother, many "caught" falls are stray predictions that happen to land within a second of a fall: the forest without room position has fall recall 0.07 and still "catches" 55.
 
-The interface allows users to explore **ground truth vs. model predictions** interactively, making it easier to validate and analyze fall detection performance.
+**Staff check: chunk lengths.** The units the HMMs and the HSMM classify, in frames, from the same script.
 
+| Activity | Chunks | Median length | Mean length |
+|---|---:|---:|---:|
+| falling | 75 | 34 | 39.6 |
+| standing | 175 | 117 | 129.1 |
+| walking | 200 | 136 | 163.6 |
+| on all fours | 25 | 216 | 208.4 |
+| lying | 151 | 471 | 401.6 |
+| sitting | 74 | 530 | 550.4 |
 
+For a 34-frame chunk, the median fall, the Poisson duration term is −3.1 nats under falling's rate and −52.4 nats under the next best, standing: a lead of 49.3 nats for falling before the HSMM has looked at a single position.
+
+## What to learn from this project
+
+Course staff added this section. The project compares four model families on a hard, realistic problem; the points below are about what its results can and cannot support.
+
+- **Score the system the way it will be used.** A fall alarm is judged by the falls it catches and how often it goes off for nothing, not by the share of frames it labels correctly. On frames, the write-up finds that the smoother adds 0.02 to accuracy and 0.01 to fall recall. Counted as alarms, it separates an unusable system from a usable one: on the authors' split the forest alone raises 155.5 false alarms per hour and the smoothed forest 4.0, while catching 44 of the 75 falls instead of 60; split by person, 179.9 against 5.3. The transition matrix knows that one fall frame in the middle of a walk is improbable, which is what an alarm needs. This is the project's best result, and the write-up never measures it. Report falls caught and false alarms per hour, and choose the operating point from them.
+- **Check whether the test data is segmented by its labels.** The per-activity HMMs and the HSMM never find where an activity starts or ends: each test recording arrives cut at its true label changes, and the models only name the pieces. The chunk accuracies of 0.72 to 0.76 answer "given that an activity runs from here to here, which is it?", a far easier question than finding a fall in a stream. Detection needs segmentation, for example Viterbi over one HMM whose states are the activities.
+- **Beware a duration model that is handed the true duration.** The HSMM adds the Poisson log-probability of each chunk's length, and the length comes from the labels. Falls are by far the shortest chunks, a median of 34 frames against 117 or more for everything else, so a fall-length chunk gets 49.3 nats in favour of falling from its length alone. That is why falling is the HSMM's best class (precision 0.68) while its accuracy is 0.21. An explicit-duration HMM searches over segmentations, and there the duration prior is a genuine prior; the "segment-level Viterbi decoding" the write-up describes is not in the code.
+- **Tune thresholds on training data only.** The LSTM's threshold of 0.94 maximizes F1 over the pooled test-fold predictions (cell 150), so its F1 of 0.68 and recall of 0.73 are optimistic; the threshold-free PR area of 0.70 (cell 152) is the fair summary. A bidirectional network also reads future frames, so an alarm needs a causal model or a stated delay.
+- **Hold out people, not recordings.** "LOSO" here means leave one recording out, so the same person's other four recordings are always in training, although cell 78 calls it leave-one-subject-out. The effect is modest here: holding out people lowers the smoothed forest's accuracy from 0.841 to 0.818 and leaves 44 falls caught. A claim about new people should still rest on the person split.
+- **Ask whether the model knows what happened or where.** Every recording follows the same script in the same room, and each of its falls happens in the same place: across the 25 recordings, the chest's mean position during a given fall has a standard deviation of at most 0.26 m in x and 0.13 m in y, against 1.19 m and 0.51 m for the chest overall. In the write-up's feature-importance figure, four of the seven most important features are x or y coordinates of the chest and belt. With every feature that depends on room position replaced, the smoothed forest's accuracy stays at 0.845, but its fall recall drops from 0.40 to 0.06 and it catches 18 falls instead of 44, 12 when split by person. Much of the fall detection is the model knowing where the script puts the falls; better location-free features might recover some of it.
+- **Name the signals correctly.** Calling positions accelerations led the write-up to read the distance from the room's origin as motion intensity and to suggest gyroscopes "for richer motion data" for data with no motion sensor at all. The team's methodology document, and a stick figure drawn from "absolute joint positions" in the first commit, had it right.
+- **Make the demo run the model you evaluated.** The dashboard's forest uses 12 coordinates instead of 32 features and has no smoother. Its LSTM compares a window's mean probability with a threshold tuned for single frames, but a fall averages 40 frames, so a 100-frame window's mean rarely reaches 0.94. The demo GIF shows one flagged window in a recording with three marked falls, above a fixed line reading "True label: falling".
+- **Ship the plan or revise it in writing.** The methodology document promised a Bayesian HMM with posterior inference in Pyro; the repository has maximum-likelihood HMMs, a broken hierarchical HMM and an input-output HMM that never ran. Dropping a plan is normal, but the write-up should say so.
+
+What the project does well: an openly licensed dataset with a clear safety motive; four model families compared on the same frames with scaling fit inside each fold; class imbalance treated as the central problem, with class weights, a weighted loss, macro F1 and a precision-recall curve; a hand-written Viterbi smoother over a classifier's probabilities, the right Bayesian idea for this problem, which works when measured as an alarm; modular training code and an interactive dashboard; and a write-up that says plainly that high accuracy is misleading and that the models miss too many falls.
+
+## About this project
+
+This project was built in Bayesian Machine Learning with Generative AI Applications (ADSP 32014), part of the Master of Science in Applied Data Science at the University of Chicago, in Winter 2026. It is shown here as an example for later cohorts.
+
+## Changes by course staff
+
+Course staff forked the authors' repository and made these edits. The authors' code is unchanged.
+
+- Extended the authors' `.gitignore`, which already excluded `*.pkl` and `*.pt`, with the `models/*/artifacts/` folders the training scripts write, the PNG files the notebook's plotting cells save into `notebooks/`, and OS and virtual-environment clutter. The tree held no clutter files, so nothing was removed.
+- Added `data/README.md`, on the dataset, its terms and citation and what its columns really are, and `staff/check_event_metrics.py`, the check described above.
+- Renamed the authors' README to `REPORT.md`, unchanged, and added this README with the program banner. `REPORT.md` keeps its wrong terms, its 11.8 MB demo GIF and its externally hosted preprocessing diagram as the authors committed them.
+
+## License
+
+The authors have not added a license, so their work is shown here under GitHub's terms for public repositories. Ask them before reusing it. The recordings are CC BY 4.0, as above.
