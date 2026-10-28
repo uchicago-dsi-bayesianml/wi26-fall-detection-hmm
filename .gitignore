@@ -31,3 +31,11 @@ __pycache__/
 
 # Streamlit cache
 .streamlit/
+
+# Added by course staff. The training scripts write their models to models/*/artifacts/
+# (the *.pkl and *.pt lines above already cover the files; this keeps the folders out too).
+# The plotting cells of notebooks/model_fitting.ipynb save PNGs into notebooks/.
+models/*/artifacts/
+notebooks/*.png
+.DS_Store
+.venv/
